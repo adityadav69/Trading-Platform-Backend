@@ -74,7 +74,7 @@ app.post("/signup", async (req, res) => {
 
 
 app.get('/',(req,res)=>{
-  console.log("App is running on render")
+  res.send("App is running on render")
 })
 
 app.post("/login", async (req, res) => {
