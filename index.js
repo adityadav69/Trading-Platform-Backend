@@ -72,6 +72,11 @@ app.post("/signup", async (req, res) => {
   }
 });
 
+
+app.get('/',(req,res)=>{
+  console.log("App is running on render")
+})
+
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
