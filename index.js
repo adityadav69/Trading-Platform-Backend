@@ -28,6 +28,10 @@ mongoose
     console.log("DB CONNECTION FAILED", err);
   });
 
+app.get("/", (req, res) => {
+  res.send("App is running on render");
+});
+
 app.post("/signup", async (req, res) => {
   try {
     const { name, age, email, password } = req.body;
@@ -71,11 +75,6 @@ app.post("/signup", async (req, res) => {
     });
   }
 });
-
-
-app.get('/',(req,res)=>{
-  res.send("App is running on render")
-})
 
 app.post("/login", async (req, res) => {
   try {
@@ -140,7 +139,7 @@ app.get("/profile", authMiddleware, async (req, res) => {
       user,
     });
   } catch (error) {
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: "Profile fetch failed",
     });
   }
@@ -188,12 +187,30 @@ app.get("/allOrders", authMiddleware, async (req, res) => {
   }
 });
 
+const updateHoldingPercentage = (holding) => {
+  const percentage = (((holding.price - holding.avg) / holding.avg) * 100).toFixed(2);
+
+  holding.net = `${percentage}%`;
+  holding.day = `${percentage}%`;
+  holding.isLoss = Number(percentage) < 0;
+};
+
+const updatePositionPercentage = (position) => {
+  const percentage = (((position.price - position.avg) / position.avg) * 100).toFixed(2);
+
+  position.net = `${percentage}%`;
+  position.day = `${percentage}%`;
+  position.isLoss = Number(percentage) < 0;
+};
+
 app.post("/newOrder", authMiddleware, async (req, res) => {
   try {
     const { name, qty, price, mode } = req.body;
 
     if (!name || !qty || !price || !mode) {
-      return res.status(400).json({ message: "All fields are required" });
+      return res.status(400).json({
+        message: "All fields are required",
+      });
     }
 
     const orderQty = Number(qty);
@@ -202,6 +219,12 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
     if (orderQty <= 0 || orderPrice <= 0) {
       return res.status(400).json({
         message: "Quantity and price must be greater than 0",
+      });
+    }
+
+    if (mode !== "BUY" && mode !== "SELL") {
+      return res.status(400).json({
+        message: "Mode must be BUY or SELL",
       });
     }
 
@@ -216,19 +239,10 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
         const oldAvg = existingHolding.avg;
 
         existingHolding.qty = oldQty + orderQty;
-        existingHolding.avg =
-          (oldQty * oldAvg + orderQty * orderPrice) / existingHolding.qty;
-
+        existingHolding.avg = (oldQty * oldAvg + orderQty * orderPrice) / existingHolding.qty;
         existingHolding.price = orderPrice;
 
-        const percentage = (
-          ((existingHolding.price - existingHolding.avg) / existingHolding.avg) *
-          100
-        ).toFixed(2);
-
-        existingHolding.net = `${percentage}%`;
-        existingHolding.day = `${percentage}%`;
-        existingHolding.isLoss = Number(percentage) < 0;
+        updateHoldingPercentage(existingHolding);
 
         await existingHolding.save();
       } else {
@@ -243,7 +257,39 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
           isLoss: false,
         });
       }
-    } else if (mode === "SELL") {
+
+      let existingPosition = await PositionsModel.findOne({
+        user: req.user.id,
+        name,
+      });
+
+      if (existingPosition) {
+        const oldQty = existingPosition.qty;
+        const oldAvg = existingPosition.avg;
+
+        existingPosition.qty = oldQty + orderQty;
+        existingPosition.avg = (oldQty * oldAvg + orderQty * orderPrice) / existingPosition.qty;
+        existingPosition.price = orderPrice;
+
+        updatePositionPercentage(existingPosition);
+
+        await existingPosition.save();
+      } else {
+        await PositionsModel.create({
+          user: req.user.id,
+          product: "CNC",
+          name,
+          qty: orderQty,
+          avg: orderPrice,
+          price: orderPrice,
+          net: "0.00%",
+          day: "0.00%",
+          isLoss: false,
+        });
+      }
+    }
+
+    if (mode === "SELL") {
       let existingHolding = await HoldingsModel.findOne({
         user: req.user.id,
         name,
@@ -264,14 +310,7 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
       existingHolding.qty -= orderQty;
       existingHolding.price = orderPrice;
 
-      const percentage = (
-        ((existingHolding.price - existingHolding.avg) / existingHolding.avg) *
-        100
-      ).toFixed(2);
-
-      existingHolding.net = `${percentage}%`;
-      existingHolding.day = `${percentage}%`;
-      existingHolding.isLoss = Number(percentage) < 0;
+      updateHoldingPercentage(existingHolding);
 
       if (existingHolding.qty <= 0) {
         await HoldingsModel.deleteOne({
@@ -281,10 +320,27 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
       } else {
         await existingHolding.save();
       }
-    } else {
-      return res.status(400).json({
-        message: "Mode must be BUY or SELL",
+
+      let existingPosition = await PositionsModel.findOne({
+        user: req.user.id,
+        name,
       });
+
+      if (existingPosition) {
+        existingPosition.qty -= orderQty;
+        existingPosition.price = orderPrice;
+
+        updatePositionPercentage(existingPosition);
+
+        if (existingPosition.qty <= 0) {
+          await PositionsModel.deleteOne({
+            user: req.user.id,
+            name,
+          });
+        } else {
+          await existingPosition.save();
+        }
+      }
     }
 
     const newOrder = new OrdersModel({
