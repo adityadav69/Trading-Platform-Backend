@@ -193,9 +193,7 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
     const { name, qty, price, mode } = req.body;
 
     if (!name || !qty || !price || !mode) {
-      return res.status(400).json({
-        message: "All fields are required",
-      });
+      return res.status(400).json({ message: "All fields are required" });
     }
 
     const orderQty = Number(qty);
@@ -207,16 +205,6 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
       });
     }
 
-    const newOrder = new OrdersModel({
-      user: req.user.id,
-      name,
-      qty: orderQty,
-      price: orderPrice,
-      mode,
-    });
-
-    await newOrder.save();
-
     if (mode === "BUY") {
       let existingHolding = await HoldingsModel.findOne({
         user: req.user.id,
@@ -226,19 +214,15 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
       if (existingHolding) {
         const oldQty = existingHolding.qty;
         const oldAvg = existingHolding.avg;
-        const buyQty = orderQty;
-        const buyPrice = orderPrice;
 
-        existingHolding.qty = oldQty + buyQty;
-
+        existingHolding.qty = oldQty + orderQty;
         existingHolding.avg =
-          (oldQty * oldAvg + buyQty * buyPrice) / existingHolding.qty;
+          (oldQty * oldAvg + orderQty * orderPrice) / existingHolding.qty;
 
-        existingHolding.price = buyPrice;
+        existingHolding.price = orderPrice;
 
         const percentage = (
-          ((existingHolding.price - existingHolding.avg) /
-            existingHolding.avg) *
+          ((existingHolding.price - existingHolding.avg) / existingHolding.avg) *
           100
         ).toFixed(2);
 
@@ -248,7 +232,7 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
 
         await existingHolding.save();
       } else {
-        const newHolding = new HoldingsModel({
+        await HoldingsModel.create({
           user: req.user.id,
           name,
           qty: orderQty,
@@ -258,8 +242,6 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
           day: "0.00%",
           isLoss: false,
         });
-
-        await newHolding.save();
       }
     } else if (mode === "SELL") {
       let existingHolding = await HoldingsModel.findOne({
@@ -304,6 +286,16 @@ app.post("/newOrder", authMiddleware, async (req, res) => {
         message: "Mode must be BUY or SELL",
       });
     }
+
+    const newOrder = new OrdersModel({
+      user: req.user.id,
+      name,
+      qty: orderQty,
+      price: orderPrice,
+      mode,
+    });
+
+    await newOrder.save();
 
     return res.status(201).json({
       message: "Order saved successfully",
